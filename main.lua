@@ -59,10 +59,10 @@ local CONVERSATIONS_FILE = APP_FOLDER .. "neuralpilot_conversations.txt"
 local GENERATED_CODE_FOLDER = APP_FOLDER .. "generated_code/"
 local SETTINGS_FILE = APP_FOLDER .. "neuralpilot_settings.json"
 
-local AUTO_UPDATE_ENABLED = true
 local AUTO_UPDATE_URL = "https://raw.githubusercontent.com/aphisitemthong-cpu/NeuralPilot-Agent/main/main.lua"
 local AUTO_UPDATE_FILE = APP_FOLDER .. "neuralpilot_latest.lua"
 local AUTO_UPDATE_LOG_FILE = APP_FOLDER .. "neuralpilot_auto_update_log.txt"
+local AUTO_UPDATE_ENABLED_DEFAULT = true
 
 local OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions"
 local OPENROUTER_MODELS_LIST_URL = "https://openrouter.ai/api/v1/models"
@@ -85,9 +85,11 @@ local agentStatusText
 local settingsProviderText
 local settingsModelText
 local settingsPermissionsText
+local autoUpdateStatusText
 local memoryButton
 local runtimeModeButton
 local responseStyleButton
+local autoUpdateButton
 local codeButton
 local stopButton
 
@@ -104,6 +106,7 @@ local googleKeyIndex = 0
 local nvidiaKeyIndex = 0
 
 local memoryEnabled = true
+local autoUpdateEnabled = AUTO_UPDATE_ENABLED_DEFAULT
 local runtimeMode = "safe"
 local permissionIO = false
 local permissionOS = false
@@ -189,6 +192,68 @@ function setupNetworkPolicy()
     end)
 end
 
+function fileExists(path)
+    local f = io.open(path, "r")
+    if f then
+        f:close()
+        return true
+    end
+    return false
+end
+
+function readTextFile(path)
+    local f = io.open(path, "r")
+    if not f then
+        return nil, "Cannot open file for reading: " .. tostring(path)
+    end
+    local content = f:read("*a")
+    f:close()
+    return content, nil
+end
+
+function saveTextFile(path, text)
+    local f = io.open(path, "w")
+    if not f then
+        return false, "Cannot open file for writing: " .. tostring(path)
+    end
+    f:write(tostring(text or ""))
+    f:close()
+    return true, ""
+end
+
+function countTextLines(text)
+    local value = tostring(text or "")
+    if value == "" then return 0 end
+
+    local count = 1
+    for _ in value:gmatch("\n") do
+        count = count + 1
+    end
+    return count
+end
+
+function formatBytes(size)
+    size = tonumber(size) or 0
+
+    if size >= 1024 * 1024 then
+        return string.format("%.2f MB", size / 1024 / 1024)
+    elseif size >= 1024 then
+        return string.format("%.2f KB", size / 1024)
+    else
+        return tostring(size) .. " bytes"
+    end
+end
+
+function extractVersionFromCode(code)
+    local version = tostring(code or ""):match('VERSION%s*=%s*"([^"]+)"')
+    if version then return version end
+
+    version = tostring(code or ""):match("VERSION%s*=%s*'([^']+)'")
+    if version then return version end
+
+    return "Unknown"
+end
+
 function autoUpdateToast(message, long)
     local text = tostring(message or "")
     if #text > 3000 then
@@ -204,7 +269,8 @@ function writeAutoUpdateLog(title, message)
         if f then
             f:write("==== " .. tostring(title) .. " ====\n")
             f:write(tostring(message or "") .. "\n")
-            f:write("App version: " .. tostring(VERSION) .. "\n")
+            f:write("Built-in app version: " .. tostring(VERSION) .. "\n")
+            f:write("Auto update enabled: " .. tostring(autoUpdateEnabled) .. "\n")
             f:write("Update URL: " .. tostring(AUTO_UPDATE_URL) .. "\n")
             f:write("Update file: " .. tostring(AUTO_UPDATE_FILE) .. "\n")
             f:write("==============================\n\n")
@@ -213,23 +279,58 @@ function writeAutoUpdateLog(title, message)
     end)
 end
 
-function fileExists(path)
-    local f = io.open(path, "r")
-    if f then
-        f:close()
-        return true
+function getLocalUpdateInfo()
+    local content = nil
+    local err = nil
+
+    if fileExists(AUTO_UPDATE_FILE) then
+        content, err = readTextFile(AUTO_UPDATE_FILE)
     end
-    return false
+
+    if content then
+        return {
+            exists = true,
+            version = extractVersionFromCode(content),
+            size = #content,
+            lines = countTextLines(content)
+        }
+    end
+
+    return {
+        exists = false,
+        version = "None",
+        size = 0,
+        lines = 0
+    }
 end
 
-function saveTextFile(path, text)
-    local f = io.open(path, "w")
-    if not f then
-        return false, "Cannot open file for writing: " .. tostring(path)
+function buildUpdateDetails(remoteContent)
+    local localInfo = getLocalUpdateInfo()
+    local remoteText = tostring(remoteContent or "")
+    local remoteVersion = extractVersionFromCode(remoteText)
+    local remoteSize = #remoteText
+    local remoteLines = countTextLines(remoteText)
+
+    local details = ""
+    details = details .. "A remote NeuralPilot Agent script is available.\n\n"
+    details = details .. "Current built-in version: " .. tostring(VERSION) .. "\n"
+    details = details .. "Saved local update version: " .. tostring(localInfo.version) .. "\n"
+    details = details .. "Remote version: " .. tostring(remoteVersion) .. "\n\n"
+    details = details .. "Remote script size: " .. formatBytes(remoteSize) .. " (" .. tostring(remoteSize) .. " bytes)\n"
+    details = details .. "Remote code lines: " .. tostring(remoteLines) .. " lines\n\n"
+
+    if localInfo.exists then
+        details = details .. "Saved local update size: " .. formatBytes(localInfo.size) .. " (" .. tostring(localInfo.size) .. " bytes)\n"
+        details = details .. "Saved local update lines: " .. tostring(localInfo.lines) .. " lines\n\n"
+    else
+        details = details .. "Saved local update: none\n\n"
     end
-    f:write(tostring(text or ""))
-    f:close()
-    return true, ""
+
+    details = details .. "Update URL:\n" .. tostring(AUTO_UPDATE_URL) .. "\n\n"
+    details = details .. "Update file:\n" .. tostring(AUTO_UPDATE_FILE) .. "\n\n"
+    details = details .. "Press Update Now to save and start the downloaded version."
+
+    return details
 end
 
 function startDownloadedLatestVersion(savedInstanceState)
@@ -287,36 +388,90 @@ function startDownloadedLatestVersion(savedInstanceState)
     return false, "Latest script loaded, but no replacement onCreate function was found."
 end
 
-function checkForLatestVersionThenStart(savedInstanceState)
+function saveAndStartRemoteUpdate(remoteContent, savedInstanceState)
+    local saveOk, saveErr = saveTextFile(AUTO_UPDATE_FILE, remoteContent)
+    if not saveOk then
+        writeAutoUpdateLog("Auto update save error", saveErr)
+        autoUpdateToast("Update download succeeded, but saving failed. Starting built-in version.", true)
+        startMainApp(savedInstanceState)
+        return
+    end
+
+    writeAutoUpdateLog("Auto update saved", "Latest script saved successfully. Size: " .. tostring(#tostring(remoteContent)) .. " bytes. Lines: " .. tostring(countTextLines(remoteContent)) .. ".")
+    autoUpdateToast("Latest version saved. Starting update.", false)
+
+    local latestOk, latestErr = startDownloadedLatestVersion(savedInstanceState)
+    if latestOk then
+        writeAutoUpdateLog("Auto update success", "Latest version started successfully.")
+        return
+    end
+
+    writeAutoUpdateLog("Auto update runtime fallback", latestErr)
+    autoUpdateToast("Latest version could not start. Starting built-in version instead.", true)
+    startMainApp(savedInstanceState)
+end
+
+function showUpdateAvailableDialog(remoteContent, savedInstanceState, manualCheck)
+    local details = buildUpdateDetails(remoteContent)
+
+    local builder = AlertDialog.Builder(activity)
+    builder.setTitle("NeuralPilot Update Available")
+    builder.setMessage(details)
+    builder.setPositiveButton("Update Now", {
+        onClick = function()
+            saveAndStartRemoteUpdate(remoteContent, savedInstanceState)
+        end
+    })
+    builder.setNegativeButton("Skip", {
+        onClick = function()
+            writeAutoUpdateLog("Auto update skipped", "User skipped update popup.")
+            if manualCheck then
+                autoUpdateToast("Update skipped.", false)
+            else
+                startMainApp(savedInstanceState)
+            end
+        end
+    })
+    builder.setNeutralButton("Disable Auto Update", {
+        onClick = function()
+            autoUpdateEnabled = false
+            saveSettings()
+            updateAutoUpdateButtonText()
+            updateAutoUpdateStatusText()
+            writeAutoUpdateLog("Auto update disabled", "User disabled auto update from update popup.")
+            autoUpdateToast("Auto update disabled.", true)
+            if not manualCheck then
+                startMainApp(savedInstanceState)
+            end
+        end
+    })
+    builder.show()
+end
+
+function checkForLatestVersionThenStart(savedInstanceState, manualCheck)
     setupNetworkPolicy()
     createFolder(APP_FOLDER)
 
-    autoUpdateToast("Checking for latest NeuralPilot Agent...", false)
+    if not autoUpdateEnabled and not manualCheck then
+        writeAutoUpdateLog("Auto update disabled", "Starting built-in version because auto update is off.")
+        startMainApp(savedInstanceState)
+        return
+    end
+
+    if manualCheck then
+        autoUpdateToast("Checking for latest NeuralPilot Agent update...", false)
+    else
+        autoUpdateToast("Checking for latest NeuralPilot Agent...", false)
+    end
+
     writeAutoUpdateLog("Auto update started", "Checking remote script.")
 
     Http.get(AUTO_UPDATE_URL, function(code, content)
         local callbackOk, callbackErr = xpcall(function()
             if code == 200 and content and tostring(content):match("%S") then
-                local saveOk, saveErr = saveTextFile(AUTO_UPDATE_FILE, content)
-                if not saveOk then
-                    writeAutoUpdateLog("Auto update save error", saveErr)
-                    autoUpdateToast("Update download succeeded, but saving failed. Starting local app.", true)
-                    startMainApp(savedInstanceState)
-                    return
-                end
+                writeAutoUpdateLog("Remote update downloaded", "Remote size: " .. tostring(#tostring(content)) .. " bytes. Remote lines: " .. tostring(countTextLines(content)) .. ".")
 
-                writeAutoUpdateLog("Auto update saved", "Latest script saved successfully. Size: " .. tostring(#tostring(content)) .. " characters.")
-                autoUpdateToast("Latest version downloaded. Starting latest NeuralPilot Agent.", false)
-
-                local latestOk, latestErr = startDownloadedLatestVersion(savedInstanceState)
-                if latestOk then
-                    writeAutoUpdateLog("Auto update success", "Latest version started successfully.")
-                    return
-                end
-
-                writeAutoUpdateLog("Auto update runtime fallback", latestErr)
-                autoUpdateToast("Latest version could not start. Starting built-in version instead.", true)
-                startMainApp(savedInstanceState)
+                showUpdateAvailableDialog(content, savedInstanceState, manualCheck)
             else
                 local msg = "Download failed. HTTP Code: " .. tostring(code)
                 if content then
@@ -324,8 +479,13 @@ function checkForLatestVersionThenStart(savedInstanceState)
                 end
 
                 writeAutoUpdateLog("Auto update download failed", msg)
-                autoUpdateToast("Could not download latest version. Starting built-in version.", true)
-                startMainApp(savedInstanceState)
+
+                if manualCheck then
+                    autoUpdateToast("Could not download latest version. HTTP Code: " .. tostring(code), true)
+                else
+                    autoUpdateToast("Could not download latest version. Starting built-in version.", true)
+                    startMainApp(savedInstanceState)
+                end
             end
         end, function(err)
             if debug and debug.traceback then
@@ -336,10 +496,51 @@ function checkForLatestVersionThenStart(savedInstanceState)
 
         if not callbackOk then
             writeAutoUpdateLog("Auto update callback fatal error", callbackErr)
-            autoUpdateToast("Update system error. Starting built-in version.", true)
-            startMainApp(savedInstanceState)
+
+            if manualCheck then
+                autoUpdateToast("Update system error. Check update log.", true)
+            else
+                autoUpdateToast("Update system error. Starting built-in version.", true)
+                startMainApp(savedInstanceState)
+            end
         end
     end)
+end
+
+function toggleAutoUpdate()
+    autoUpdateEnabled = not autoUpdateEnabled
+    saveSettings()
+    updateAutoUpdateButtonText()
+    updateAutoUpdateStatusText()
+
+    if autoUpdateEnabled then
+        speak("Automatic update is enabled.")
+    else
+        speak("Automatic update is disabled.")
+    end
+end
+
+function updateAutoUpdateButtonText()
+    if autoUpdateButton then
+        autoUpdateButton.setText(autoUpdateEnabled and "Automatic Update: On" or "Automatic Update: Off")
+    end
+end
+
+function updateAutoUpdateStatusText()
+    if autoUpdateStatusText then
+        local localInfo = getLocalUpdateInfo()
+        local status = autoUpdateEnabled and "On" or "Off"
+
+        autoUpdateStatusText.setText(
+            "Automatic update: " .. status ..
+            "\nUpdate URL: " .. tostring(AUTO_UPDATE_URL) ..
+            "\nSaved update file: " .. tostring(AUTO_UPDATE_FILE) ..
+            "\nSaved update version: " .. tostring(localInfo.version) ..
+            "\nSaved update size: " .. formatBytes(localInfo.size) ..
+            "\nSaved update lines: " .. tostring(localInfo.lines) ..
+            "\nUpdate log: " .. tostring(AUTO_UPDATE_LOG_FILE)
+        )
+    end
 end
 
 function splitApiKeys(text)
@@ -391,6 +592,7 @@ function saveSettings()
         nvidiaModel = nvidiaModel,
         apiProvider = apiProvider,
         memoryEnabled = memoryEnabled,
+        autoUpdateEnabled = autoUpdateEnabled,
         runtimeMode = runtimeMode,
         permissionIO = permissionIO,
         permissionOS = permissionOS,
@@ -436,6 +638,7 @@ function loadSettings()
     end
 
     if data.memoryEnabled ~= nil then memoryEnabled = data.memoryEnabled end
+    if data.autoUpdateEnabled ~= nil then autoUpdateEnabled = data.autoUpdateEnabled end
     if data.permissionIO ~= nil then permissionIO = data.permissionIO end
     if data.permissionOS ~= nil then permissionOS = data.permissionOS end
     if data.permissionImport ~= nil then permissionImport = data.permissionImport end
@@ -1049,6 +1252,9 @@ Use Response Style in Settings to choose how NeuralPilot answers. There are 10 s
 
 Library Import:
 In Settings, enable "Allow import, require, and package in runtime" if you want generated Lua code to import libraries or Java classes. Use with care.
+
+Auto Update:
+You can turn automatic updates on or off in Settings. When enabled, NeuralPilot checks the GitHub main.lua file when the app opens. If a remote script is found, a popup shows version, size, line count, update URL, and local file details before you choose Update Now.
 
 Example code for the model:
 local topic = "AI"
@@ -2364,7 +2570,8 @@ Main features:
 13. Stop generation at any time.
 14. Use multiple API keys per provider.
 15. Use four runtime modes: Safe, Expanded, Android, and Unrestricted.
-16. Automatically checks for the latest version from GitHub when the app opens.
+16. Automatic update can be turned on or off in Settings.
+17. When an update is found, a popup shows version, file size, code line count, URL, and saved local update details before you choose Update Now.
 
 Response styles:
 Balanced, Concise, Detailed, Friendly, Professional, Step-by-step, Beginner-friendly, Accessibility-focused, Technical, and Creative.
@@ -2372,8 +2579,8 @@ Balanced, Concise, Detailed, Friendly, Professional, Step-by-step, Beginner-frie
 Library import:
 Enable "Allow import, require, and package in runtime" in Settings.
 
-Auto update:
-When the app opens, NeuralPilot checks the GitHub main.lua file. If the download succeeds, it saves the newest file locally and starts it. If the newest file cannot start, the built-in version starts instead.
+Auto Update:
+When automatic update is enabled, NeuralPilot checks the GitHub main.lua file when the app opens. If the remote script downloads successfully, a popup appears with update details. You can press Update Now, Skip, or Disable Auto Update.
 
 Example Lua code:
 local topic = "AI"
@@ -2476,15 +2683,19 @@ function buildSettingsLayout()
     updateLabel.setText("Auto Update")
     layout.addView(updateLabel)
 
-    local updateInfoText = TextView(activity)
-    updateInfoText.setText("Auto update is enabled. NeuralPilot checks GitHub every time the app opens.\nUpdate file: " .. AUTO_UPDATE_FILE .. "\nUpdate log: " .. AUTO_UPDATE_LOG_FILE)
-    layout.addView(updateInfoText)
+    autoUpdateStatusText = TextView(activity)
+    layout.addView(autoUpdateStatusText)
+
+    autoUpdateButton = Button(activity)
+    updateAutoUpdateButtonText()
+    autoUpdateButton.setOnClickListener{onClick = function() toggleAutoUpdate() end}
+    layout.addView(autoUpdateButton)
 
     local checkUpdateButton = Button(activity)
     checkUpdateButton.setText("Check Latest Version Now")
     checkUpdateButton.setOnClickListener{
         onClick = function()
-            checkForLatestVersionThenStart(nil)
+            checkForLatestVersionThenStart(nil, true)
         end
     }
     layout.addView(checkUpdateButton)
@@ -2507,6 +2718,8 @@ function showSettingsPage()
     updateRuntimeModeButtonText()
     updateResponseStyleButtonText()
     updatePermissionsStatusText()
+    updateAutoUpdateButtonText()
+    updateAutoUpdateStatusText()
     activity.setContentView(settingsLayout)
 end
 
@@ -2530,7 +2743,7 @@ Library Import:
 In Settings, enable "Allow import, require, and package in runtime" if you want generated Lua code to import libraries or Java classes. Use with care.
 
 Auto Update:
-This version checks for a newer script from GitHub when the app opens. If the newest script downloads and starts correctly, that version runs. If there is a download error or runtime error, the built-in version starts instead.
+Automatic update can be turned on or off in Settings. When enabled, NeuralPilot checks the GitHub main.lua file when the app opens. If a remote script is found, a popup shows the remote version, file size, byte count, code line count, update URL, saved local update version, saved local update size, and saved local update line count. You can press Update Now to save and start the downloaded version.
 
 Example code for the model:
 local topic = "AI"
@@ -2568,8 +2781,19 @@ function startMainApp(savedInstanceState)
     agentStatusText = TextView(activity)
     mainLayout.addView(agentStatusText)
 
+    local localInfo = getLocalUpdateInfo()
+    local updateState = autoUpdateEnabled and "On" or "Off"
+
     local storageInfo = TextView(activity)
-    storageInfo.setText("Storage: " .. APP_FOLDER .. "\nGenerated code: " .. GENERATED_CODE_FOLDER .. "\nAuto update file: " .. AUTO_UPDATE_FILE)
+    storageInfo.setText(
+        "Storage: " .. APP_FOLDER ..
+        "\nGenerated code: " .. GENERATED_CODE_FOLDER ..
+        "\nAutomatic update: " .. updateState ..
+        "\nSaved update file: " .. AUTO_UPDATE_FILE ..
+        "\nSaved update version: " .. tostring(localInfo.version) ..
+        "\nSaved update size: " .. formatBytes(localInfo.size) ..
+        "\nSaved update lines: " .. tostring(localInfo.lines)
+    )
     mainLayout.addView(storageInfo)
 
     selectedModelText = TextView(activity)
@@ -2662,9 +2886,11 @@ function startMainApp(savedInstanceState)
 end
 
 function onCreate(savedInstanceState)
-    if AUTO_UPDATE_ENABLED and not _G.NEURALPILOT_BOOTLOADED_LATEST then
-        ensureFiles()
-        checkForLatestVersionThenStart(savedInstanceState)
+    ensureFiles()
+    loadSettings()
+
+    if autoUpdateEnabled and not _G.NEURALPILOT_BOOTLOADED_LATEST then
+        checkForLatestVersionThenStart(savedInstanceState, false)
     else
         startMainApp(savedInstanceState)
     end
