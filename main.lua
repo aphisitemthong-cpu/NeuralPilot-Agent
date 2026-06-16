@@ -52,7 +52,7 @@ end
 
 local activity = activity
 local APP_NAME = "NeuralPilot Agent"
-local VERSION = "3.5.2"
+local VERSION = "3.5.3"
 
 local APP_FOLDER = "/storage/emulated/0/NeuralPilot/"
 local CONVERSATIONS_FILE = APP_FOLDER .. "neuralpilot_conversations.txt"
@@ -77,8 +77,11 @@ local vibrator
 local isListening = false
 
 local mainLayout
+local mainScrollView
 local settingsLayout
 local conversationTextView
+local conversationScrollView
+local conversationLabelText
 local taskInput
 local selectedModelText
 local agentStatusText
@@ -703,13 +706,25 @@ end
 
 function appendConversationDisplay(text)
     if not conversationTextView then return end
+
     text = tostring(text or "")
     local old = tostring(conversationTextView.getText())
+
     if old == "" then
         conversationTextView.setText(text)
     else
         conversationTextView.setText(old .. "\n\n" .. text)
     end
+
+    pcall(function()
+        conversationTextView.requestFocus()
+    end)
+
+    pcall(function()
+        if conversationScrollView then
+            conversationScrollView.fullScroll(View.FOCUS_DOWN)
+        end
+    end)
 end
 
 function getProviderDisplayName()
@@ -775,6 +790,7 @@ function updateAgentStatusText()
         stopButton.setEnabled(agentActive)
     end
 end
+
 function updateSelectedModelText()
     if selectedModelText then
         selectedModelText.setText("Provider: " .. getProviderDisplayName() .. " | Model: " .. getCurrentModelName() .. " | Runtime: " .. getRuntimeModeDisplayName() .. " | Style: " .. responseStyle)
@@ -1286,6 +1302,9 @@ The saved update file is stored here:
 Settings Page:
 The Settings page uses a ScrollView, so all settings can be reached on smaller mobile screens.
 
+Main Conversation Area:
+The main screen now has a dedicated conversation section above the message input. This makes the human-readable conversation easier to find with touch, screen readers, and normal scrolling.
+
 Example code for the model:
 local topic = "AI"
 local url = "https://th.wikipedia.org/w/api.php?action=query&format=json&prop=extracts&exintro=1&explaintext=1&titles=" .. urlEncode(topic)
@@ -1331,7 +1350,6 @@ function showModelSelectionDialog(names)
     })
     builder.show()
 end
-
 function showDefaultNvidiaModels()
     showModelSelectionDialog({
         "meta/llama-3.1-8b-instruct",
@@ -1577,6 +1595,7 @@ function callGoogleAI(systemText, userText, temperature, onSuccess, onFailure, r
         end
     end)
 end
+
 function callAI(systemText, userText, temperature, onSuccess, onFailure, runId)
     if shouldIgnoreCallback(runId) then return end
 
@@ -2604,6 +2623,7 @@ Main features:
 16. Automatic update can be turned on or off in Settings.
 17. If an update is skipped or the internet fails, NeuralPilot starts the latest saved update first.
 18. The built-in version is used only if no saved update exists or the saved update cannot start.
+19. The main conversation is shown in a dedicated Conversation area above the message input.
 
 Response styles:
 Balanced, Concise, Detailed, Friendly, Professional, Step-by-step, Beginner-friendly, Accessibility-focused, Technical, and Creative.
@@ -2615,6 +2635,9 @@ Saved Update:
 The saved update file is stored here:
 /storage/emulated/0/NeuralPilot/neuralpilot_latest.lua
 
+Main Conversation Area:
+The conversation display is now placed before the message input and has a clear Conversation label. When new messages are added, the conversation text requests focus and scrolls down so screen reader users can find it more easily.
+
 Credits:
 Developer: Jieshuo Library
 Join our channel: t.me/Jieshuolibrary
@@ -2622,7 +2645,6 @@ Join our channel: t.me/Jieshuolibrary
     builder.setPositiveButton("OK", nil)
     builder.show()
 end
-
 function buildSettingsLayout()
     local scrollView = ScrollView(activity)
 
@@ -2754,7 +2776,7 @@ function showSettingsPage()
 end
 
 function showMainPage()
-    activity.setContentView(mainLayout)
+    activity.setContentView(mainScrollView or mainLayout)
 end
 
 function startMainApp(savedInstanceState)
@@ -2763,6 +2785,8 @@ function startMainApp(savedInstanceState)
     setupNetworkPolicy()
     ensureFiles()
     loadSettings()
+
+    mainScrollView = ScrollView(activity)
 
     mainLayout = LinearLayout(activity)
     mainLayout.setOrientation(LinearLayout.VERTICAL)
@@ -2793,6 +2817,28 @@ function startMainApp(savedInstanceState)
 
     selectedModelText = TextView(activity)
     mainLayout.addView(selectedModelText)
+
+    conversationLabelText = TextView(activity)
+    conversationLabelText.setText("Conversation")
+    conversationLabelText.setTextSize(18)
+    mainLayout.addView(conversationLabelText)
+
+    conversationScrollView = ScrollView(activity)
+    conversationScrollView.setFillViewport(false)
+
+    conversationTextView = TextView(activity)
+    conversationTextView.setText("No conversation yet. Send a message to NeuralPilot, and the conversation will appear here.")
+    conversationTextView.setTextSize(16)
+    conversationTextView.setFocusable(true)
+    conversationTextView.setFocusableInTouchMode(true)
+
+    conversationScrollView.addView(conversationTextView)
+    mainLayout.addView(conversationScrollView, LinearLayout.LayoutParams(-1, 420))
+
+    local inputLabel = TextView(activity)
+    inputLabel.setText("Message Input")
+    inputLabel.setTextSize(18)
+    mainLayout.addView(inputLabel)
 
     taskInput = EditText(activity)
     taskInput.setHint("Type your message here. NeuralPilot can chat, import libraries when allowed, call APIs, run code, or do both for hard tasks.")
@@ -2844,14 +2890,8 @@ function startMainApp(savedInstanceState)
     helpButton.setOnClickListener{onClick = function() showAgentHelp() end}
     mainLayout.addView(helpButton)
 
-    local scrollView = ScrollView(activity)
-    conversationTextView = TextView(activity)
-    conversationTextView.setText("")
-    conversationTextView.setTextSize(16)
-    scrollView.addView(conversationTextView)
-    mainLayout.addView(scrollView, LinearLayout.LayoutParams(-1, 0, 1))
-
-    activity.setContentView(mainLayout)
+    mainScrollView.addView(mainLayout)
+    activity.setContentView(mainScrollView)
 
     updateAgentStatusText()
     updateSelectedModelText()
