@@ -1,0 +1,15 @@
+name: NeuralPilot GitHub Bot
+
+on:
+  workflow_dispatch:
+
+jobs:
+  test-action:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Show bot message
+        run: echo "NeuralPilot GitHub Action is working."
