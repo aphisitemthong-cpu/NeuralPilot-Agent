@@ -1256,6 +1256,9 @@ In Settings, enable "Allow import, require, and package in runtime" if you want 
 Auto Update:
 You can turn automatic updates on or off in Settings. When enabled, NeuralPilot checks the GitHub main.lua file when the app opens. If a remote script is found, a popup shows version, size, line count, update URL, and local file details before you choose Update Now.
 
+Settings Page Fix:
+The Settings page is now inside a ScrollView, so the Automatic Update section can be reached on smaller mobile screens.
+
 Example code for the model:
 local topic = "AI"
 local url = "https://th.wikipedia.org/w/api.php?action=query&format=json&prop=extracts&exintro=1&explaintext=1&titles=" .. urlEncode(topic)
@@ -2572,6 +2575,7 @@ Main features:
 15. Use four runtime modes: Safe, Expanded, Android, and Unrestricted.
 16. Automatic update can be turned on or off in Settings.
 17. When an update is found, a popup shows version, file size, code line count, URL, and saved local update details before you choose Update Now.
+18. The Settings page is scrollable, so all settings can be reached on smaller mobile screens.
 
 Response styles:
 Balanced, Concise, Detailed, Friendly, Professional, Step-by-step, Beginner-friendly, Accessibility-focused, Technical, and Creative.
@@ -2581,6 +2585,9 @@ Enable "Allow import, require, and package in runtime" in Settings.
 
 Auto Update:
 When automatic update is enabled, NeuralPilot checks the GitHub main.lua file when the app opens. If the remote script downloads successfully, a popup appears with update details. You can press Update Now, Skip, or Disable Auto Update.
+
+Settings Page:
+The Settings page now uses a ScrollView. This makes the Automatic Update controls reachable even when the screen is small.
 
 Example Lua code:
 local topic = "AI"
@@ -2600,6 +2607,8 @@ Join our channel: t.me/Jieshuolibrary
 end
 
 function buildSettingsLayout()
+    local scrollView = ScrollView(activity)
+
     local layout = LinearLayout(activity)
     layout.setOrientation(LinearLayout.VERTICAL)
     layout.setPadding(16, 16, 16, 16)
@@ -2705,13 +2714,16 @@ function buildSettingsLayout()
     backButton.setOnClickListener{onClick = function() showMainPage() end}
     layout.addView(backButton)
 
-    return layout
+    scrollView.addView(layout)
+
+    return scrollView
 end
 
 function showSettingsPage()
     if not settingsLayout then
         settingsLayout = buildSettingsLayout()
     end
+
     updateSettingsProviderText()
     updateSettingsModelText()
     updateMemoryButtonText()
@@ -2720,46 +2732,12 @@ function showSettingsPage()
     updatePermissionsStatusText()
     updateAutoUpdateButtonText()
     updateAutoUpdateStatusText()
+
     activity.setContentView(settingsLayout)
 end
 
 function showMainPage()
     activity.setContentView(mainLayout)
-end
-
-function showApiSetupHelp()
-    local builder = AlertDialog.Builder(activity)
-    builder.setTitle("NeuralPilot Setup Help")
-    builder.setMessage([[
-NeuralPilot Agent is designed for everyday users. You can chat normally, ask questions, solve calculations, call simple APIs, handle complex tasks, check device details, and let the AI run Lua code when useful.
-
-Personal Info:
-Use Set Personal Info on the home screen to save anything you want NeuralPilot to remember in every conversation.
-
-Response Style:
-Use Response Style in Settings to choose how NeuralPilot answers. There are 10 styles: Balanced, Concise, Detailed, Friendly, Professional, Step-by-step, Beginner-friendly, Accessibility-focused, Technical, and Creative.
-
-Library Import:
-In Settings, enable "Allow import, require, and package in runtime" if you want generated Lua code to import libraries or Java classes. Use with care.
-
-Auto Update:
-Automatic update can be turned on or off in Settings. When enabled, NeuralPilot checks the GitHub main.lua file when the app opens. If a remote script is found, a popup shows the remote version, file size, byte count, code line count, update URL, saved local update version, saved local update size, and saved local update line count. You can press Update Now to save and start the downloaded version.
-
-Example code for the model:
-local topic = "AI"
-local url = "https://th.wikipedia.org/w/api.php?action=query&format=json&prop=extracts&exintro=1&explaintext=1&titles=" .. urlEncode(topic)
-local raw = httpGet(url)
-local data = json.decode(raw)
-for pageId, page in pairs(data.query.pages) do
-    print(page.extract)
-end
-
-Credits:
-Developer: Jieshuo Library
-Join our channel: t.me/Jieshuolibrary
-]])
-    builder.setPositiveButton("OK", nil)
-    builder.show()
 end
 
 function startMainApp(savedInstanceState)
