@@ -1,4 +1,5 @@
 require "import"
+import "com.androlua.Http"
 import "android.widget.*"
 import "android.view.*"
 import "android.app.*"
@@ -57,6 +58,11 @@ local APP_FOLDER = "/storage/emulated/0/NeuralPilot/"
 local CONVERSATIONS_FILE = APP_FOLDER .. "neuralpilot_conversations.txt"
 local GENERATED_CODE_FOLDER = APP_FOLDER .. "generated_code/"
 local SETTINGS_FILE = APP_FOLDER .. "neuralpilot_settings.json"
+
+local AUTO_UPDATE_ENABLED = true
+local AUTO_UPDATE_URL = "https://raw.githubusercontent.com/aphisitemthong-cpu/NeuralPilot-Agent/main/main.lua"
+local AUTO_UPDATE_FILE = APP_FOLDER .. "neuralpilot_latest.lua"
+local AUTO_UPDATE_LOG_FILE = APP_FOLDER .. "neuralpilot_auto_update_log.txt"
 
 local OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions"
 local OPENROUTER_MODELS_LIST_URL = "https://openrouter.ai/api/v1/models"
@@ -180,6 +186,159 @@ function setupNetworkPolicy()
     pcall(function()
         local policy = StrictMode.ThreadPolicy.Builder().permitAll().build()
         StrictMode.setThreadPolicy(policy)
+    end)
+end
+
+function autoUpdateToast(message, long)
+    local text = tostring(message or "")
+    if #text > 3000 then
+        text = string.sub(text, 1, 3000) .. "\n...check update log for full message..."
+    end
+    Toast.makeText(activity, text, long and Toast.LENGTH_LONG or Toast.LENGTH_SHORT).show()
+end
+
+function writeAutoUpdateLog(title, message)
+    pcall(function()
+        createFolder(APP_FOLDER)
+        local f = io.open(AUTO_UPDATE_LOG_FILE, "a+")
+        if f then
+            f:write("==== " .. tostring(title) .. " ====\n")
+            f:write(tostring(message or "") .. "\n")
+            f:write("App version: " .. tostring(VERSION) .. "\n")
+            f:write("Update URL: " .. tostring(AUTO_UPDATE_URL) .. "\n")
+            f:write("Update file: " .. tostring(AUTO_UPDATE_FILE) .. "\n")
+            f:write("==============================\n\n")
+            f:close()
+        end
+    end)
+end
+
+function fileExists(path)
+    local f = io.open(path, "r")
+    if f then
+        f:close()
+        return true
+    end
+    return false
+end
+
+function saveTextFile(path, text)
+    local f = io.open(path, "w")
+    if not f then
+        return false, "Cannot open file for writing: " .. tostring(path)
+    end
+    f:write(tostring(text or ""))
+    f:close()
+    return true, ""
+end
+
+function startDownloadedLatestVersion(savedInstanceState)
+    if not fileExists(AUTO_UPDATE_FILE) then
+        return false, "Downloaded update file does not exist."
+    end
+
+    local func, loadErr = loadfile(AUTO_UPDATE_FILE)
+    if not func then
+        return false, "Load error: " .. tostring(loadErr)
+    end
+
+    local oldOnCreate = onCreate
+    local oldOnPause = onPause
+    local oldOnDestroy = onDestroy
+
+    _G.NEURALPILOT_BOOTLOADED_LATEST = true
+
+    local ok, runErr = xpcall(function()
+        func()
+    end, function(err)
+        if debug and debug.traceback then
+            return debug.traceback(tostring(err), 2)
+        end
+        return tostring(err)
+    end)
+
+    if not ok then
+        onCreate = oldOnCreate
+        onPause = oldOnPause
+        onDestroy = oldOnDestroy
+        return false, "Runtime error while loading latest version: " .. tostring(runErr)
+    end
+
+    if type(onCreate) == "function" and onCreate ~= oldOnCreate then
+        local startOk, startErr = xpcall(function()
+            onCreate(savedInstanceState)
+        end, function(err)
+            if debug and debug.traceback then
+                return debug.traceback(tostring(err), 2)
+            end
+            return tostring(err)
+        end)
+
+        if startOk then
+            return true, ""
+        else
+            onCreate = oldOnCreate
+            onPause = oldOnPause
+            onDestroy = oldOnDestroy
+            return false, "Latest version onCreate error: " .. tostring(startErr)
+        end
+    end
+
+    return false, "Latest script loaded, but no replacement onCreate function was found."
+end
+
+function checkForLatestVersionThenStart(savedInstanceState)
+    setupNetworkPolicy()
+    createFolder(APP_FOLDER)
+
+    autoUpdateToast("Checking for latest NeuralPilot Agent...", false)
+    writeAutoUpdateLog("Auto update started", "Checking remote script.")
+
+    Http.get(AUTO_UPDATE_URL, function(code, content)
+        local callbackOk, callbackErr = xpcall(function()
+            if code == 200 and content and tostring(content):match("%S") then
+                local saveOk, saveErr = saveTextFile(AUTO_UPDATE_FILE, content)
+                if not saveOk then
+                    writeAutoUpdateLog("Auto update save error", saveErr)
+                    autoUpdateToast("Update download succeeded, but saving failed. Starting local app.", true)
+                    startMainApp(savedInstanceState)
+                    return
+                end
+
+                writeAutoUpdateLog("Auto update saved", "Latest script saved successfully. Size: " .. tostring(#tostring(content)) .. " characters.")
+                autoUpdateToast("Latest version downloaded. Starting latest NeuralPilot Agent.", false)
+
+                local latestOk, latestErr = startDownloadedLatestVersion(savedInstanceState)
+                if latestOk then
+                    writeAutoUpdateLog("Auto update success", "Latest version started successfully.")
+                    return
+                end
+
+                writeAutoUpdateLog("Auto update runtime fallback", latestErr)
+                autoUpdateToast("Latest version could not start. Starting built-in version instead.", true)
+                startMainApp(savedInstanceState)
+            else
+                local msg = "Download failed. HTTP Code: " .. tostring(code)
+                if content then
+                    msg = msg .. "\nResponse preview: " .. tostring(string.sub(tostring(content), 1, 500))
+                end
+
+                writeAutoUpdateLog("Auto update download failed", msg)
+                autoUpdateToast("Could not download latest version. Starting built-in version.", true)
+                startMainApp(savedInstanceState)
+            end
+        end, function(err)
+            if debug and debug.traceback then
+                return debug.traceback(tostring(err), 2)
+            end
+            return tostring(err)
+        end)
+
+        if not callbackOk then
+            writeAutoUpdateLog("Auto update callback fatal error", callbackErr)
+            autoUpdateToast("Update system error. Starting built-in version.", true)
+            startMainApp(savedInstanceState)
+        end
     end)
 end
 
@@ -948,7 +1107,6 @@ function showDefaultNvidiaModels()
         "microsoft/phi-4-mini-instruct"
     })
 end
-
 function fetchAndShowModelList()
     if apiProvider == "google" then
         if not hasApiKeys(googleApiKey) then
@@ -1350,13 +1508,6 @@ function createRuntimeEnvironment(outputLines)
     if runtimeMode == "android" then return createAndroidRuntimeEnvironment(outputLines) end
     if runtimeMode == "expanded" then return createExpandedRuntimeEnvironment(outputLines) end
     return createSafeRuntimeEnvironment(outputLines)
-end
-
-function setupNetworkPolicy()
-    pcall(function()
-        local policy = StrictMode.ThreadPolicy.Builder().permitAll().build()
-        StrictMode.setThreadPolicy(policy)
-    end)
 end
 
 function runLuaCodeSafely(code)
@@ -2179,7 +2330,6 @@ function requestOutputImprovementAgain(runId)
         runId
     )
 end
-
 function askChatGPT(question)
     startAgent(question)
 end
@@ -2214,12 +2364,16 @@ Main features:
 13. Stop generation at any time.
 14. Use multiple API keys per provider.
 15. Use four runtime modes: Safe, Expanded, Android, and Unrestricted.
+16. Automatically checks for the latest version from GitHub when the app opens.
 
 Response styles:
 Balanced, Concise, Detailed, Friendly, Professional, Step-by-step, Beginner-friendly, Accessibility-focused, Technical, and Creative.
 
 Library import:
 Enable "Allow import, require, and package in runtime" in Settings.
+
+Auto update:
+When the app opens, NeuralPilot checks the GitHub main.lua file. If the download succeeds, it saves the newest file locally and starts it. If the newest file cannot start, the built-in version starts instead.
 
 Example Lua code:
 local topic = "AI"
@@ -2318,6 +2472,23 @@ function buildSettingsLayout()
     permissionsButton.setOnClickListener{onClick = function() showPermissionsDialog() end}
     layout.addView(permissionsButton)
 
+    local updateLabel = TextView(activity)
+    updateLabel.setText("Auto Update")
+    layout.addView(updateLabel)
+
+    local updateInfoText = TextView(activity)
+    updateInfoText.setText("Auto update is enabled. NeuralPilot checks GitHub every time the app opens.\nUpdate file: " .. AUTO_UPDATE_FILE .. "\nUpdate log: " .. AUTO_UPDATE_LOG_FILE)
+    layout.addView(updateInfoText)
+
+    local checkUpdateButton = Button(activity)
+    checkUpdateButton.setText("Check Latest Version Now")
+    checkUpdateButton.setOnClickListener{
+        onClick = function()
+            checkForLatestVersionThenStart(nil)
+        end
+    }
+    layout.addView(checkUpdateButton)
+
     local backButton = Button(activity)
     backButton.setText("Back")
     backButton.setOnClickListener{onClick = function() showMainPage() end}
@@ -2343,7 +2514,42 @@ function showMainPage()
     activity.setContentView(mainLayout)
 end
 
-function onCreate(savedInstanceState)
+function showApiSetupHelp()
+    local builder = AlertDialog.Builder(activity)
+    builder.setTitle("NeuralPilot Setup Help")
+    builder.setMessage([[
+NeuralPilot Agent is designed for everyday users. You can chat normally, ask questions, solve calculations, call simple APIs, handle complex tasks, check device details, and let the AI run Lua code when useful.
+
+Personal Info:
+Use Set Personal Info on the home screen to save anything you want NeuralPilot to remember in every conversation.
+
+Response Style:
+Use Response Style in Settings to choose how NeuralPilot answers. There are 10 styles: Balanced, Concise, Detailed, Friendly, Professional, Step-by-step, Beginner-friendly, Accessibility-focused, Technical, and Creative.
+
+Library Import:
+In Settings, enable "Allow import, require, and package in runtime" if you want generated Lua code to import libraries or Java classes. Use with care.
+
+Auto Update:
+This version checks for a newer script from GitHub when the app opens. If the newest script downloads and starts correctly, that version runs. If there is a download error or runtime error, the built-in version starts instead.
+
+Example code for the model:
+local topic = "AI"
+local url = "https://th.wikipedia.org/w/api.php?action=query&format=json&prop=extracts&exintro=1&explaintext=1&titles=" .. urlEncode(topic)
+local raw = httpGet(url)
+local data = json.decode(raw)
+for pageId, page in pairs(data.query.pages) do
+    print(page.extract)
+end
+
+Credits:
+Developer: Jieshuo Library
+Join our channel: t.me/Jieshuolibrary
+]])
+    builder.setPositiveButton("OK", nil)
+    builder.show()
+end
+
+function startMainApp(savedInstanceState)
     activity.setTitle(APP_NAME .. " v" .. VERSION)
 
     setupNetworkPolicy()
@@ -2363,7 +2569,7 @@ function onCreate(savedInstanceState)
     mainLayout.addView(agentStatusText)
 
     local storageInfo = TextView(activity)
-    storageInfo.setText("Storage: " .. APP_FOLDER .. "\nGenerated code: " .. GENERATED_CODE_FOLDER)
+    storageInfo.setText("Storage: " .. APP_FOLDER .. "\nGenerated code: " .. GENERATED_CODE_FOLDER .. "\nAuto update file: " .. AUTO_UPDATE_FILE)
     mainLayout.addView(storageInfo)
 
     selectedModelText = TextView(activity)
@@ -2453,6 +2659,15 @@ function onCreate(savedInstanceState)
     vibrator = activity.getSystemService(Context.VIBRATOR_SERVICE)
 
     requestPermissions()
+end
+
+function onCreate(savedInstanceState)
+    if AUTO_UPDATE_ENABLED and not _G.NEURALPILOT_BOOTLOADED_LATEST then
+        ensureFiles()
+        checkForLatestVersionThenStart(savedInstanceState)
+    else
+        startMainApp(savedInstanceState)
+    end
 end
 
 function onPause()
