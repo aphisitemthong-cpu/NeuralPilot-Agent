@@ -52,7 +52,10 @@ end
 
 local activity = activity
 local APP_NAME = "NeuralPilot Agent"
-local VERSION = "3.5.4"
+local VERSION = "3.5.5"
+local APP_SUPPORT_URL = "https://t.me/Jieshuolibrary"
+local OPENROUTER_APPLICATION_URL = APP_SUPPORT_URL
+local OPENROUTER_APP_TITLE = APP_NAME .. " v" .. VERSION
 
 local APP_FOLDER = "/storage/emulated/0/NeuralPilot/"
 local CONVERSATIONS_FILE = APP_FOLDER .. "neuralpilot_conversations.txt"
@@ -273,6 +276,7 @@ function writeAutoUpdateLog(title, message)
             f:write(tostring(message or "") .. "\n")
             f:write("Built-in app version: " .. tostring(VERSION) .. "\n")
             f:write("Auto update enabled: " .. tostring(autoUpdateEnabled) .. "\n")
+            f:write("Application URL: " .. tostring(APP_SUPPORT_URL) .. "\n")
             f:write("Update URL: " .. tostring(AUTO_UPDATE_URL) .. "\n")
             f:write("Update file: " .. tostring(AUTO_UPDATE_FILE) .. "\n")
             f:write("==============================\n\n")
@@ -328,6 +332,7 @@ function buildUpdateDetails(remoteContent)
         details = details .. "Saved local update: none\n\n"
     end
 
+    details = details .. "Application URL:\n" .. tostring(APP_SUPPORT_URL) .. "\n\n"
     details = details .. "Update URL:\n" .. tostring(AUTO_UPDATE_URL) .. "\n\n"
     details = details .. "Update file:\n" .. tostring(AUTO_UPDATE_FILE) .. "\n\n"
     details = details .. "Press Update Now to save and start the downloaded version."
@@ -559,6 +564,7 @@ function updateAutoUpdateStatusText()
 
         autoUpdateStatusText.setText(
             "Automatic update: " .. status ..
+            "\nApplication URL: " .. tostring(APP_SUPPORT_URL) ..
             "\nUpdate URL: " .. tostring(AUTO_UPDATE_URL) ..
             "\nSaved update file: " .. tostring(AUTO_UPDATE_FILE) ..
             "\nSaved update version: " .. tostring(localInfo.version) ..
@@ -1283,6 +1289,13 @@ Use Response Style in Settings to choose how NeuralPilot answers. There are 10 s
 Library Import:
 In Safe, Expanded, and Android Runtime, enable "Allow import, require, and package in Safe/Expanded/Android runtime" if you want generated Lua code to import libraries or Java classes. In Unrestricted Runtime, NeuralPilot uses the real app environment as much as possible and exposes import, require, package, Android objects, existing helpers, and current globals automatically.
 
+OpenRouter Application Info:
+Application title:
+NeuralPilot Agent v3.5.5
+
+Application URL and support URL:
+https://t.me/Jieshuolibrary
+
 Auto Update:
 Automatic update can be turned on or off in Settings. When it is on, NeuralPilot checks GitHub when the app opens. If the user skips the update popup or the internet fails, NeuralPilot now tries to start the latest saved update first. It only falls back to the built-in version if no saved update exists or the saved update cannot start.
 
@@ -1294,7 +1307,7 @@ Settings Page:
 The Settings page uses a ScrollView, so all settings can be reached on smaller mobile screens.
 
 Main Page:
-The main page now uses a full-screen ScrollView so the conversation display remains reachable and readable with TalkBack even when status text, buttons, and storage information take more screen space.
+The main page uses a full-screen ScrollView so the conversation display remains reachable and readable with TalkBack even when status text, buttons, and storage information take more screen space.
 
 Example code for the model:
 local topic = "AI"
@@ -1307,7 +1320,7 @@ end
 
 Credits:
 Developer: Jieshuo Library
-Join our channel: t.me/Jieshuolibrary
+Join our channel: https://t.me/Jieshuolibrary
 ]])
     builder.setPositiveButton("OK", nil)
     builder.show()
@@ -1423,7 +1436,11 @@ function fetchAndShowModelList()
         end)
 
     else
-        local headers = {}
+        local headers = {
+            ["HTTP-Referer"] = OPENROUTER_APPLICATION_URL,
+            ["X-Title"] = OPENROUTER_APP_TITLE
+        }
+
         if hasApiKeys(openRouterApiKey) then
             headers["Authorization"] = "Bearer " .. getNextApiKey("openrouter")
         end
@@ -1485,8 +1502,8 @@ function callOpenRouter(messages, temperature, onSuccess, onFailure, runId)
     local headers = {
         ["Content-Type"] = "application/json",
         ["Authorization"] = "Bearer " .. getNextApiKey("openrouter"),
-        ["HTTP-Referer"] = "https://neuralpilot.local",
-        ["X-Title"] = "NeuralPilot Agent"
+        ["HTTP-Referer"] = OPENROUTER_APPLICATION_URL,
+        ["X-Title"] = OPENROUTER_APP_TITLE
     }
 
     Http.post(OPENROUTER_API_URL, cjson.encode(body), headers, function(code, content)
@@ -1504,7 +1521,11 @@ function callOpenRouter(messages, temperature, onSuccess, onFailure, runId)
                 onFailure("Unexpected OpenRouter response format.")
             end
         else
-            onFailure("OpenRouter request failed. Code: " .. tostring(code))
+            local detail = ""
+            if content and tostring(content):match("%S") then
+                detail = " Response: " .. tostring(string.sub(tostring(content), 1, 500))
+            end
+            onFailure("OpenRouter request failed. Code: " .. tostring(code) .. detail)
         end
     end)
 end
@@ -1662,6 +1683,9 @@ function exposeUnrestrictedRuntimeGlobals()
     _G.activity = activity
     _G.APP_NAME = APP_NAME
     _G.VERSION = VERSION
+    _G.APP_SUPPORT_URL = APP_SUPPORT_URL
+    _G.OPENROUTER_APPLICATION_URL = OPENROUTER_APPLICATION_URL
+    _G.OPENROUTER_APP_TITLE = OPENROUTER_APP_TITLE
     _G.APP_FOLDER = APP_FOLDER
     _G.CONVERSATIONS_FILE = CONVERSATIONS_FILE
     _G.GENERATED_CODE_FOLDER = GENERATED_CODE_FOLDER
@@ -1799,6 +1823,9 @@ function exposeUnrestrictedRuntimeGlobals()
     _G.appInfo = {
         name = APP_NAME,
         version = VERSION,
+        supportUrl = APP_SUPPORT_URL,
+        openRouterApplicationUrl = OPENROUTER_APPLICATION_URL,
+        openRouterAppTitle = OPENROUTER_APP_TITLE,
         folder = APP_FOLDER,
         conversationsFile = CONVERSATIONS_FILE,
         generatedCodeFolder = GENERATED_CODE_FOLDER,
@@ -1858,6 +1885,9 @@ function createBaseRuntimeEnvironment(outputLines)
     env.appInfo = {
         name = APP_NAME,
         version = VERSION,
+        supportUrl = APP_SUPPORT_URL,
+        openRouterApplicationUrl = OPENROUTER_APPLICATION_URL,
+        openRouterAppTitle = OPENROUTER_APP_TITLE,
         folder = APP_FOLDER,
         conversationsFile = CONVERSATIONS_FILE,
         generatedCodeFolder = GENERATED_CODE_FOLDER,
@@ -2033,7 +2063,7 @@ Runtime helpers:
 - httpGet(url) is available for simple HTTP GET requests and returns text.
 - urlEncode(text) is available for URL encoding.
 - userProfile contains persistent user personal info.
-- appInfo contains app metadata.
+- appInfo contains app metadata, supportUrl, openRouterApplicationUrl, and openRouterAppTitle.
 - androidBuild contains device metadata.
 ]] .. importText .. profile .. "\n" .. example .. "\n"
 
@@ -2098,6 +2128,13 @@ Your purpose:
 - In Unrestricted Runtime, do not guess package paths. Use exposed globals, import, require only when naturally available, or inspect _G if needed.
 - Never expose raw code or raw runtime output unless explicitly asked.
 - Always provide a clear final answer.
+
+Application information:
+- App name: NeuralPilot Agent
+- App version: 3.5.5
+- Support URL: https://t.me/Jieshuolibrary
+- OpenRouter app title: NeuralPilot Agent v3.5.5
+- OpenRouter application URL: https://t.me/Jieshuolibrary
 
 Respond only with JSON. Do not use Markdown.
 
@@ -2785,9 +2822,17 @@ Main features:
 18. The built-in version is used only if no saved update exists or the saved update cannot start.
 19. In Unrestricted Runtime, generated Lua runs in the real app environment as much as possible and can use existing globals, helpers, Android objects, import, require, package, io, os, files, and libraries visible to the main script.
 20. The main page uses a full-screen ScrollView so the conversation display remains reachable with TalkBack.
+21. OpenRouter requests use the app title NeuralPilot Agent v3.5.5 and the application URL https://t.me/Jieshuolibrary.
 
 Response styles:
 Balanced, Concise, Detailed, Friendly, Professional, Step-by-step, Beginner-friendly, Accessibility-focused, Technical, and Creative.
+
+OpenRouter Application Info:
+Application title:
+NeuralPilot Agent v3.5.5
+
+Application URL and support URL:
+https://t.me/Jieshuolibrary
 
 Auto Update:
 When automatic update is enabled, NeuralPilot checks GitHub when the app opens. If a remote script is found, a popup shows version, file size, code line count, URL, and saved local update details. If you press Update Now, the remote code is saved and started. If you press Skip, NeuralPilot starts the latest saved update if available.
@@ -2798,7 +2843,7 @@ The saved update file is stored here:
 
 Credits:
 Developer: Jieshuo Library
-Join our channel: t.me/Jieshuolibrary
+Join our channel: https://t.me/Jieshuolibrary
 ]])
     builder.setPositiveButton("OK", nil)
     builder.show()
@@ -2974,6 +3019,8 @@ function startMainApp(savedInstanceState)
     storageInfo.setText(
         "Storage: " .. APP_FOLDER ..
         "\nGenerated code: " .. GENERATED_CODE_FOLDER ..
+        "\nApplication URL: " .. APP_SUPPORT_URL ..
+        "\nOpenRouter title: " .. OPENROUTER_APP_TITLE ..
         "\nAutomatic update: " .. updateState ..
         "\nSaved update file: " .. AUTO_UPDATE_FILE ..
         "\nSaved update version: " .. tostring(localInfo.version) ..
