@@ -77,11 +77,8 @@ local vibrator
 local isListening = false
 
 local mainLayout
-local mainScrollView
 local settingsLayout
 local conversationTextView
-local conversationScrollView
-local conversationLabelText
 local taskInput
 local selectedModelText
 local agentStatusText
@@ -706,25 +703,13 @@ end
 
 function appendConversationDisplay(text)
     if not conversationTextView then return end
-
     text = tostring(text or "")
     local old = tostring(conversationTextView.getText())
-
     if old == "" then
         conversationTextView.setText(text)
     else
         conversationTextView.setText(old .. "\n\n" .. text)
     end
-
-    pcall(function()
-        conversationTextView.requestFocus()
-    end)
-
-    pcall(function()
-        if conversationScrollView then
-            conversationScrollView.fullScroll(View.FOCUS_DOWN)
-        end
-    end)
 end
 
 function getProviderDisplayName()
@@ -834,7 +819,11 @@ function updatePermissionsStatusText()
     local ioState = permissionIO and "allowed" or "blocked"
     local osState = permissionOS and "allowed" or "blocked"
 
-    settingsPermissionsText.setText("Runtime permissions: io " .. ioState .. ", os " .. osState .. ", import " .. importState .. ".")
+    if runtimeMode == "unrestricted" then
+        settingsPermissionsText.setText("Runtime permissions: unrestricted mode uses the real app environment. io, os, import, require, package, Android objects, and existing app helpers are exposed automatically.")
+    else
+        settingsPermissionsText.setText("Runtime permissions: io " .. ioState .. ", os " .. osState .. ", import " .. importState .. ".")
+    end
 end
 
 function updateCodeButtonText()
@@ -1206,12 +1195,13 @@ end
 function showUnrestrictedWarningThenEnable()
     local builder = AlertDialog.Builder(activity)
     builder.setTitle("Unrestricted Runtime Warning")
-    builder.setMessage("Unrestricted Runtime gives AI-generated Lua access to the full app environment allowed by Android and app permissions. It may crash the app, access files allowed by permissions, import libraries, open Android APIs, or behave unexpectedly. Use it only when you trust the task and model.")
+    builder.setMessage("Unrestricted Runtime gives AI-generated Lua access to the real app environment as much as possible. It can use existing globals, helpers, Android objects, import, require, package, io, os, files, and libraries visible to the main script. It may crash the app, access files allowed by permissions, change data, import libraries, open Android APIs, or behave unexpectedly. Use it only when you trust the task and model.")
     builder.setPositiveButton("Enable", {
         onClick = function()
             runtimeMode = "unrestricted"
             permissionUnrestricted = true
             saveSettings()
+            exposeUnrestrictedRuntimeGlobals()
             updateRuntimeModeButtonText()
             updatePermissionsStatusText()
             updateSettingsModelText()
@@ -1252,7 +1242,7 @@ function showPermissionsDialog()
     local items = {
         "Allow io library in Safe/Expanded prompts",
         "Allow os library in Safe/Expanded prompts",
-        "Allow import, require, and package in runtime"
+        "Allow import, require, and package in Safe/Expanded/Android runtime"
     }
 
     local checked = {permissionIO, permissionOS, permissionImport}
@@ -1276,7 +1266,6 @@ function showPermissionsDialog()
     builder.setNegativeButton("Cancel", nil)
     builder.show()
 end
-
 function showApiSetupHelp()
     local builder = AlertDialog.Builder(activity)
     builder.setTitle("NeuralPilot Setup Help")
@@ -1290,7 +1279,7 @@ Response Style:
 Use Response Style in Settings to choose how NeuralPilot answers. There are 10 styles: Balanced, Concise, Detailed, Friendly, Professional, Step-by-step, Beginner-friendly, Accessibility-focused, Technical, and Creative.
 
 Library Import:
-In Settings, enable "Allow import, require, and package in runtime" if you want generated Lua code to import libraries or Java classes. Use with care.
+In Safe, Expanded, and Android Runtime, enable "Allow import, require, and package in Safe/Expanded/Android runtime" if you want generated Lua code to import libraries or Java classes. In Unrestricted Runtime, NeuralPilot uses the real app environment as much as possible and exposes import, require, package, Android objects, existing helpers, and current globals automatically.
 
 Auto Update:
 Automatic update can be turned on or off in Settings. When it is on, NeuralPilot checks GitHub when the app opens. If the user skips the update popup or the internet fails, NeuralPilot now tries to start the latest saved update first. It only falls back to the built-in version if no saved update exists or the saved update cannot start.
@@ -1301,9 +1290,6 @@ The saved update file is stored here:
 
 Settings Page:
 The Settings page uses a ScrollView, so all settings can be reached on smaller mobile screens.
-
-Main Conversation Area:
-The main screen now has a dedicated conversation section above the message input. This makes the human-readable conversation easier to find with touch, screen readers, and normal scrolling.
 
 Example code for the model:
 local topic = "AI"
@@ -1350,6 +1336,7 @@ function showModelSelectionDialog(names)
     })
     builder.show()
 end
+
 function showDefaultNvidiaModels()
     showModelSelectionDialog({
         "meta/llama-3.1-8b-instruct",
@@ -1666,6 +1653,157 @@ function urlEncodeSync(text)
     return tostring(URLEncoder.encode(tostring(text or ""), "UTF-8"))
 end
 
+function exposeUnrestrictedRuntimeGlobals()
+    _G.activity = activity
+    _G.APP_NAME = APP_NAME
+    _G.VERSION = VERSION
+    _G.APP_FOLDER = APP_FOLDER
+    _G.CONVERSATIONS_FILE = CONVERSATIONS_FILE
+    _G.GENERATED_CODE_FOLDER = GENERATED_CODE_FOLDER
+    _G.SETTINGS_FILE = SETTINGS_FILE
+    _G.AUTO_UPDATE_URL = AUTO_UPDATE_URL
+    _G.AUTO_UPDATE_FILE = AUTO_UPDATE_FILE
+    _G.AUTO_UPDATE_LOG_FILE = AUTO_UPDATE_LOG_FILE
+
+    _G.Http = Http
+    _G.cjson = cjson
+    _G.json = cjson
+    _G.File = File
+    _G.URL = URL
+    _G.URLEncoder = URLEncoder
+    _G.BufferedReader = BufferedReader
+    _G.InputStreamReader = InputStreamReader
+    _G.Uri = Uri
+    _G.Settings = Settings
+    _G.Build = Build
+    _G.Intent = Intent
+    _G.Context = Context
+    _G.Toast = Toast
+    _G.Vibrator = Vibrator
+    _G.ClipboardManager = ClipboardManager
+    _G.ClipData = ClipData
+    _G.Manifest = Manifest
+    _G.PackageManager = PackageManager
+    _G.StrictMode = StrictMode
+    _G.TextToSpeech = TextToSpeech
+    _G.SpeechRecognizer = SpeechRecognizer
+    _G.RecognizerIntent = RecognizerIntent
+
+    _G.import = import
+    _G.require = require
+    _G.package = package
+    _G.io = io
+    _G.os = os
+    _G.math = math
+    _G.string = string
+    _G.table = table
+
+    _G.tts = tts
+    _G.speechRecognizer = speechRecognizer
+    _G.vibrator = vibrator
+    _G.mainLayout = mainLayout
+    _G.settingsLayout = settingsLayout
+    _G.conversationTextView = conversationTextView
+    _G.taskInput = taskInput
+    _G.selectedModelText = selectedModelText
+    _G.agentStatusText = agentStatusText
+    _G.settingsProviderText = settingsProviderText
+    _G.settingsModelText = settingsModelText
+    _G.settingsPermissionsText = settingsPermissionsText
+    _G.autoUpdateStatusText = autoUpdateStatusText
+    _G.memoryButton = memoryButton
+    _G.runtimeModeButton = runtimeModeButton
+    _G.responseStyleButton = responseStyleButton
+    _G.autoUpdateButton = autoUpdateButton
+    _G.codeButton = codeButton
+    _G.stopButton = stopButton
+
+    _G.openRouterApiKey = openRouterApiKey
+    _G.openRouterModel = openRouterModel
+    _G.googleApiKey = googleApiKey
+    _G.googleModel = googleModel
+    _G.nvidiaApiKey = nvidiaApiKey
+    _G.nvidiaModel = nvidiaModel
+    _G.apiProvider = apiProvider
+    _G.memoryEnabled = memoryEnabled
+    _G.autoUpdateEnabled = autoUpdateEnabled
+    _G.runtimeMode = runtimeMode
+    _G.permissionIO = permissionIO
+    _G.permissionOS = permissionOS
+    _G.permissionImport = permissionImport
+    _G.permissionUnrestricted = permissionUnrestricted
+    _G.userPersonalInfo = userPersonalInfo
+    _G.responseStyle = responseStyle
+    _G.generatedCodeCount = generatedCodeCount
+    _G.generatedCodes = generatedCodes
+    _G.currentConversation = currentConversation
+    _G.currentUserTask = currentUserTask
+    _G.currentHistoryText = currentHistoryText
+    _G.lastGeneratedCode = lastGeneratedCode
+    _G.lastRuntimeOutput = lastRuntimeOutput
+    _G.lastRuntimeError = lastRuntimeError
+    _G.currentAssistantPrefix = currentAssistantPrefix
+
+    _G.addItem = addItem
+    _G.joinList = joinList
+    _G.hasText = hasText
+    _G.trimText = trimText
+    _G.createFolder = createFolder
+    _G.ensureFiles = ensureFiles
+    _G.setupNetworkPolicy = setupNetworkPolicy
+    _G.fileExists = fileExists
+    _G.readTextFile = readTextFile
+    _G.saveTextFile = saveTextFile
+    _G.countTextLines = countTextLines
+    _G.formatBytes = formatBytes
+    _G.extractVersionFromCode = extractVersionFromCode
+    _G.autoUpdateToast = autoUpdateToast
+    _G.writeAutoUpdateLog = writeAutoUpdateLog
+    _G.getLocalUpdateInfo = getLocalUpdateInfo
+    _G.saveSettings = saveSettings
+    _G.loadSettings = loadSettings
+    _G.speak = speak
+    _G.vibrate = vibrate
+    _G.appendConversationDisplay = appendConversationDisplay
+    _G.getProviderDisplayName = getProviderDisplayName
+    _G.getCurrentModelName = getCurrentModelName
+    _G.getRuntimeModeDisplayName = getRuntimeModeDisplayName
+    _G.getResponseStyleInstruction = getResponseStyleInstruction
+    _G.copyToClipboard = copyToClipboard
+    _G.extractBestCode = extractBestCode
+    _G.parseJsonLike = parseJsonLike
+    _G.getAnyUserAnswer = getAnyUserAnswer
+    _G.saveConversation = saveConversation
+    _G.saveCodeToFile = saveCodeToFile
+    _G.httpGetSync = httpGetSync
+    _G.urlEncodeSync = urlEncodeSync
+    _G.httpGet = httpGetSync
+    _G.urlEncode = urlEncodeSync
+    _G.askChatGPT = askChatGPT
+    _G.runTypedTask = runTypedTask
+
+    _G.androidBuild = {
+        release = tostring(Build.VERSION.RELEASE),
+        sdk = tostring(Build.VERSION.SDK_INT),
+        manufacturer = tostring(Build.MANUFACTURER),
+        model = tostring(Build.MODEL)
+    }
+
+    _G.appInfo = {
+        name = APP_NAME,
+        version = VERSION,
+        folder = APP_FOLDER,
+        conversationsFile = CONVERSATIONS_FILE,
+        generatedCodeFolder = GENERATED_CODE_FOLDER,
+        provider = getProviderDisplayName(),
+        model = getCurrentModelName(),
+        runtimeMode = getRuntimeModeDisplayName(),
+        responseStyle = responseStyle
+    }
+
+    _G.userProfile = tostring(userPersonalInfo or "")
+end
+
 function createBaseRuntimeEnvironment(outputLines)
     local env = {}
 
@@ -1777,22 +1915,14 @@ function runLuaCodeSafely(code)
     local originalPrint = print
 
     if runtimeMode == "unrestricted" then
+        exposeUnrestrictedRuntimeGlobals()
+
         _G.print = function(...)
             local parts = {}
             for i = 1, select("#", ...) do
                 addItem(parts, tostring(select(i, ...)))
             end
             addItem(outputLines, joinList(parts, "\t"))
-        end
-        _G.json = cjson
-        _G.cjson = cjson
-        _G.httpGet = httpGetSync
-        _G.urlEncode = urlEncodeSync
-        _G.userProfile = tostring(userPersonalInfo or "")
-        if permissionImport then
-            _G.import = import
-            _G.require = require
-            _G.package = package
         end
     end
 
@@ -1804,7 +1934,7 @@ function runLuaCodeSafely(code)
             if env then
                 return load(code, "neuralpilot_generated_code", "t", env)
             end
-            return load(code, "neuralpilot_generated_code", "t")
+            return load(code, "neuralpilot_generated_code", "t", _G)
         end)
         if ok and loadedOrError then
             chunk = loadedOrError
@@ -1815,8 +1945,12 @@ function runLuaCodeSafely(code)
 
     if not chunk and loadstring then
         chunk, loadError = loadstring(code, "neuralpilot_generated_code")
-        if chunk and setfenv and env then
-            setfenv(chunk, env)
+        if chunk and setfenv then
+            if env then
+                setfenv(chunk, env)
+            elseif runtimeMode == "unrestricted" then
+                setfenv(chunk, _G)
+            end
         end
     end
 
@@ -1841,6 +1975,11 @@ function runLuaCodeSafely(code)
         addItem(outputLines, "Result variable: " .. tostring(env.result))
     end
 
+    if runtimeMode == "unrestricted" and _G.result ~= nil then
+        addItem(outputLines, "Result variable: " .. tostring(_G.result))
+        _G.result = nil
+    end
+
     local output = joinList(outputLines, "\n")
     if not ok then
         return false, output, tostring(result)
@@ -1859,7 +1998,14 @@ function buildPermissionGuidelines()
         profile = "\nPersistent user personal info:\n" .. tostring(userPersonalInfo) .. "\n"
     end
 
-    local importText = permissionImport and "- import, require, and package are available when the runtime environment exposes them.\n" or "- import, require, and package are blocked unless the user enables library import in settings.\n"
+    local importText = ""
+    if runtimeMode == "unrestricted" then
+        importText = "- import, require, and package are available automatically because Unrestricted Runtime uses the real app environment.\n"
+    elseif permissionImport then
+        importText = "- import, require, and package are available when the runtime environment exposes them.\n"
+    else
+        importText = "- import, require, and package are blocked unless the user enables library import in settings.\n"
+    end
 
     local example = [[
 Example Lua code for a Wikipedia API task:
@@ -1887,7 +2033,11 @@ Runtime helpers:
     if runtimeMode == "unrestricted" then
         return base .. [[
 Runtime mode: Unrestricted Runtime.
-- AI-generated Lua runs in the full app runtime allowed by Android and app permissions.
+- AI-generated Lua runs in the real global app environment as much as possible.
+- The generated code can use existing globals, helpers, Android objects, current app variables, import, require, package, io, os, files, and libraries visible to the main script.
+- Do not guess package paths. Do not modify package.path unless the user explicitly provides a path.
+- Prefer import("full.java.or.android.class.Name") or direct use of globals already exposed by the main app.
+- You may inspect available global names by iterating pairs(_G) if needed.
 - Do not perform destructive actions unless the user explicitly asks.
 - Do not access private data unless the user explicitly asks.
 ]]
@@ -1937,6 +2087,8 @@ Your purpose:
 - Use local Lua execution when it improves accuracy or enables API/data work.
 - For web/API tasks, you may generate Lua using httpGet(url), urlEncode(text), and json.decode(...).
 - If library import is enabled, you may import libraries/classes when useful and safe.
+- In Unrestricted Runtime, you may use the real app environment, current globals, Android objects, existing helpers, import, require, package, io, os, and libraries visible to the main script.
+- In Unrestricted Runtime, do not guess package paths. Use exposed globals, import, require only when naturally available, or inspect _G if needed.
 - Never expose raw code or raw runtime output unless explicitly asked.
 - Always provide a clear final answer.
 
@@ -2055,7 +2207,7 @@ Rules:
 - Use httpGet(url) for API calls.
 - Use urlEncode(text) for query text.
 - Use json.decode(text) for JSON.
-- Use import only if enabled.
+- Use import only if enabled or if Unrestricted Runtime is active.
 - No placeholders.
 - No Markdown.
 
@@ -2097,7 +2249,6 @@ function requestCompleteCodeRepair(incompleteCode, runId)
         runId
     )
 end
-
 function makeValidationPrompt(userTask, code, output, err)
     return [[
 You are NeuralPilot's execution controller.
@@ -2464,7 +2615,8 @@ Rules:
 - Use httpGet(url) for API calls.
 - Use urlEncode(text) for query text.
 - Use json.decode(text) for JSON.
-- Use import only if enabled.
+- Use import only if enabled or if Unrestricted Runtime is active.
+- In Unrestricted Runtime, use the real app environment and exposed globals instead of guessing package paths.
 - No Markdown.
 - No placeholders.
 
@@ -2536,7 +2688,8 @@ Rules:
 - Use httpGet(url) for API calls.
 - Use urlEncode(text) for query text.
 - Use json.decode(text) for JSON.
-- Use import only if enabled.
+- Use import only if enabled or if Unrestricted Runtime is active.
+- In Unrestricted Runtime, use the real app environment and exposed globals instead of guessing package paths.
 - No Markdown.
 - No placeholders.
 
@@ -2623,7 +2776,7 @@ Main features:
 16. Automatic update can be turned on or off in Settings.
 17. If an update is skipped or the internet fails, NeuralPilot starts the latest saved update first.
 18. The built-in version is used only if no saved update exists or the saved update cannot start.
-19. The main conversation is shown in a dedicated Conversation area above the message input.
+19. In Unrestricted Runtime, generated Lua runs in the real app environment as much as possible and can use existing globals, helpers, Android objects, import, require, package, io, os, files, and libraries visible to the main script.
 
 Response styles:
 Balanced, Concise, Detailed, Friendly, Professional, Step-by-step, Beginner-friendly, Accessibility-focused, Technical, and Creative.
@@ -2635,9 +2788,6 @@ Saved Update:
 The saved update file is stored here:
 /storage/emulated/0/NeuralPilot/neuralpilot_latest.lua
 
-Main Conversation Area:
-The conversation display is now placed before the message input and has a clear Conversation label. When new messages are added, the conversation text requests focus and scrolls down so screen reader users can find it more easily.
-
 Credits:
 Developer: Jieshuo Library
 Join our channel: t.me/Jieshuolibrary
@@ -2645,6 +2795,7 @@ Join our channel: t.me/Jieshuolibrary
     builder.setPositiveButton("OK", nil)
     builder.show()
 end
+
 function buildSettingsLayout()
     local scrollView = ScrollView(activity)
 
@@ -2776,7 +2927,7 @@ function showSettingsPage()
 end
 
 function showMainPage()
-    activity.setContentView(mainScrollView or mainLayout)
+    activity.setContentView(mainLayout)
 end
 
 function startMainApp(savedInstanceState)
@@ -2786,7 +2937,9 @@ function startMainApp(savedInstanceState)
     ensureFiles()
     loadSettings()
 
-    mainScrollView = ScrollView(activity)
+    if runtimeMode == "unrestricted" then
+        exposeUnrestrictedRuntimeGlobals()
+    end
 
     mainLayout = LinearLayout(activity)
     mainLayout.setOrientation(LinearLayout.VERTICAL)
@@ -2817,28 +2970,6 @@ function startMainApp(savedInstanceState)
 
     selectedModelText = TextView(activity)
     mainLayout.addView(selectedModelText)
-
-    conversationLabelText = TextView(activity)
-    conversationLabelText.setText("Conversation")
-    conversationLabelText.setTextSize(18)
-    mainLayout.addView(conversationLabelText)
-
-    conversationScrollView = ScrollView(activity)
-    conversationScrollView.setFillViewport(false)
-
-    conversationTextView = TextView(activity)
-    conversationTextView.setText("No conversation yet. Send a message to NeuralPilot, and the conversation will appear here.")
-    conversationTextView.setTextSize(16)
-    conversationTextView.setFocusable(true)
-    conversationTextView.setFocusableInTouchMode(true)
-
-    conversationScrollView.addView(conversationTextView)
-    mainLayout.addView(conversationScrollView, LinearLayout.LayoutParams(-1, 420))
-
-    local inputLabel = TextView(activity)
-    inputLabel.setText("Message Input")
-    inputLabel.setTextSize(18)
-    mainLayout.addView(inputLabel)
 
     taskInput = EditText(activity)
     taskInput.setHint("Type your message here. NeuralPilot can chat, import libraries when allowed, call APIs, run code, or do both for hard tasks.")
@@ -2890,8 +3021,18 @@ function startMainApp(savedInstanceState)
     helpButton.setOnClickListener{onClick = function() showAgentHelp() end}
     mainLayout.addView(helpButton)
 
-    mainScrollView.addView(mainLayout)
-    activity.setContentView(mainScrollView)
+    local scrollView = ScrollView(activity)
+    conversationTextView = TextView(activity)
+    conversationTextView.setText("")
+    conversationTextView.setTextSize(16)
+    scrollView.addView(conversationTextView)
+    mainLayout.addView(scrollView, LinearLayout.LayoutParams(-1, 0, 1))
+
+    activity.setContentView(mainLayout)
+
+    if runtimeMode == "unrestricted" then
+        exposeUnrestrictedRuntimeGlobals()
+    end
 
     updateAgentStatusText()
     updateSelectedModelText()
@@ -2901,6 +3042,9 @@ function startMainApp(savedInstanceState)
         onInit = function(status)
             if status == TextToSpeech.SUCCESS then
                 tts.setLanguage(Locale.getDefault())
+                if runtimeMode == "unrestricted" then
+                    exposeUnrestrictedRuntimeGlobals()
+                end
                 initialGreeting()
             else
                 Toast.makeText(activity, "Text-to-speech initialization failed.", Toast.LENGTH_SHORT).show()
@@ -2917,12 +3061,20 @@ function startMainApp(savedInstanceState)
 
     vibrator = activity.getSystemService(Context.VIBRATOR_SERVICE)
 
+    if runtimeMode == "unrestricted" then
+        exposeUnrestrictedRuntimeGlobals()
+    end
+
     requestPermissions()
 end
 
 function onCreate(savedInstanceState)
     ensureFiles()
     loadSettings()
+
+    if runtimeMode == "unrestricted" then
+        exposeUnrestrictedRuntimeGlobals()
+    end
 
     if _G.NEURALPILOT_BOOTLOADED_LATEST then
         startMainApp(savedInstanceState)
