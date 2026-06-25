@@ -52,7 +52,7 @@ end
 
 local activity = activity
 local APP_NAME = "NeuralPilot Agent"
-local VERSION = "3.5.3"
+local VERSION = "3.5.4"
 
 local APP_FOLDER = "/storage/emulated/0/NeuralPilot/"
 local CONVERSATIONS_FILE = APP_FOLDER .. "neuralpilot_conversations.txt"
@@ -76,9 +76,11 @@ local speechRecognizer
 local vibrator
 local isListening = false
 
+local mainScrollView
 local mainLayout
 local settingsLayout
 local conversationTextView
+local conversationScrollView
 local taskInput
 local selectedModelText
 local agentStatusText
@@ -1291,6 +1293,9 @@ The saved update file is stored here:
 Settings Page:
 The Settings page uses a ScrollView, so all settings can be reached on smaller mobile screens.
 
+Main Page:
+The main page now uses a full-screen ScrollView so the conversation display remains reachable and readable with TalkBack even when status text, buttons, and storage information take more screen space.
+
 Example code for the model:
 local topic = "AI"
 local url = "https://th.wikipedia.org/w/api.php?action=query&format=json&prop=extracts&exintro=1&explaintext=1&titles=" .. urlEncode(topic)
@@ -1701,9 +1706,11 @@ function exposeUnrestrictedRuntimeGlobals()
     _G.tts = tts
     _G.speechRecognizer = speechRecognizer
     _G.vibrator = vibrator
+    _G.mainScrollView = mainScrollView
     _G.mainLayout = mainLayout
     _G.settingsLayout = settingsLayout
     _G.conversationTextView = conversationTextView
+    _G.conversationScrollView = conversationScrollView
     _G.taskInput = taskInput
     _G.selectedModelText = selectedModelText
     _G.agentStatusText = agentStatusText
@@ -2777,6 +2784,7 @@ Main features:
 17. If an update is skipped or the internet fails, NeuralPilot starts the latest saved update first.
 18. The built-in version is used only if no saved update exists or the saved update cannot start.
 19. In Unrestricted Runtime, generated Lua runs in the real app environment as much as possible and can use existing globals, helpers, Android objects, import, require, package, io, os, files, and libraries visible to the main script.
+20. The main page uses a full-screen ScrollView so the conversation display remains reachable with TalkBack.
 
 Response styles:
 Balanced, Concise, Detailed, Friendly, Professional, Step-by-step, Beginner-friendly, Accessibility-focused, Technical, and Creative.
@@ -2927,7 +2935,11 @@ function showSettingsPage()
 end
 
 function showMainPage()
-    activity.setContentView(mainLayout)
+    if mainScrollView then
+        activity.setContentView(mainScrollView)
+    elseif mainLayout then
+        activity.setContentView(mainLayout)
+    end
 end
 
 function startMainApp(savedInstanceState)
@@ -2940,6 +2952,8 @@ function startMainApp(savedInstanceState)
     if runtimeMode == "unrestricted" then
         exposeUnrestrictedRuntimeGlobals()
     end
+
+    mainScrollView = ScrollView(activity)
 
     mainLayout = LinearLayout(activity)
     mainLayout.setOrientation(LinearLayout.VERTICAL)
@@ -3021,14 +3035,22 @@ function startMainApp(savedInstanceState)
     helpButton.setOnClickListener{onClick = function() showAgentHelp() end}
     mainLayout.addView(helpButton)
 
-    local scrollView = ScrollView(activity)
+    local conversationLabel = TextView(activity)
+    conversationLabel.setText("Conversation")
+    conversationLabel.setTextSize(18)
+    mainLayout.addView(conversationLabel)
+
+    conversationScrollView = ScrollView(activity)
     conversationTextView = TextView(activity)
     conversationTextView.setText("")
     conversationTextView.setTextSize(16)
-    scrollView.addView(conversationTextView)
-    mainLayout.addView(scrollView, LinearLayout.LayoutParams(-1, 0, 1))
+    conversationTextView.setMinLines(8)
+    conversationTextView.setPadding(0, 8, 0, 24)
+    conversationScrollView.addView(conversationTextView)
+    mainLayout.addView(conversationScrollView, LinearLayout.LayoutParams(-1, -2))
 
-    activity.setContentView(mainLayout)
+    mainScrollView.addView(mainLayout)
+    activity.setContentView(mainScrollView)
 
     if runtimeMode == "unrestricted" then
         exposeUnrestrictedRuntimeGlobals()
